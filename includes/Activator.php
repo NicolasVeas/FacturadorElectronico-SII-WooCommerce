@@ -13,14 +13,14 @@ class Activator {
         $wpdb->query("SET FOREIGN_KEY_CHECKS=0");
 
         $sql = "
-        CREATE TABLE {$wpdb->prefix}sii_wc_credentials (
+        CREATE TABLE IF NOT EXISTS {$wpdb->prefix}sii_wc_credentials (
             id INT NOT NULL AUTO_INCREMENT,
             email VARCHAR(255) NOT NULL,
             password VARCHAR(255) NOT NULL,
             PRIMARY KEY (id)
         ) $charset_collate;
 
-        CREATE TABLE {$wpdb->prefix}sii_wc_emitters (
+        CREATE TABLE IF NOT EXISTS {$wpdb->prefix}sii_wc_emitters (
             id INT NOT NULL AUTO_INCREMENT,
             rut VARCHAR(10) NOT NULL,
             razon_social VARCHAR(100) NOT NULL,
@@ -33,7 +33,7 @@ class Activator {
             PRIMARY KEY (id)
         ) $charset_collate;
 
-        CREATE TABLE {$wpdb->prefix}sii_wc_receivers (
+        CREATE TABLE IF NOT EXISTS {$wpdb->prefix}sii_wc_receivers (
             id INT NOT NULL AUTO_INCREMENT,
             rut VARCHAR(10) NOT NULL,
             nombre VARCHAR(100) NOT NULL,
@@ -44,7 +44,7 @@ class Activator {
             PRIMARY KEY (id)
         ) $charset_collate;
 
-        CREATE TABLE {$wpdb->prefix}sii_wc_dtes (
+        CREATE TABLE IF NOT EXISTS {$wpdb->prefix}sii_wc_dtes (
             id INT NOT NULL AUTO_INCREMENT,
             order_id INT NOT NULL,
             document_type INT NOT NULL,
@@ -53,7 +53,6 @@ class Activator {
             rut_emisor VARCHAR(10) NOT NULL,
             rut_receptor VARCHAR(10) NOT NULL,
             status VARCHAR(255) NOT NULL,
-            last_successful_status VARCHAR(255) DEFAULT NULL,
             folio INT DEFAULT NULL,
             created TIMESTAMP NULL,
             grouped TIMESTAMP NULL,
@@ -65,11 +64,12 @@ class Activator {
             PRIMARY KEY (id)
         ) $charset_collate;
 
-        CREATE TABLE {$wpdb->prefix}sii_wc_shipments (
+        CREATE TABLE IF NOT EXISTS {$wpdb->prefix}sii_wc_shipments (
             id INT NOT NULL AUTO_INCREMENT,
             dte_id INT NOT NULL,
             fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             estado VARCHAR(255) NOT NULL,
+            detalle TEXT NOT NULL,
             PRIMARY KEY (id),
             FOREIGN KEY (dte_id) REFERENCES {$wpdb->prefix}sii_wc_dtes(id) ON DELETE CASCADE ON UPDATE CASCADE
         ) $charset_collate;
@@ -97,6 +97,46 @@ class Activator {
                 error_log("Error: la tabla $table no pudo ser creada.");
             }
         }
+
+        // Programar el cron job
+        self::schedule_cron_jobs();
+    }
+
+    public static function desactivar() {
+        // Desprogramar el cron job
+        self::unschedule_cron_jobs();
+    }
+
+    private static function schedule_cron_jobs() {
+        if (!wp_next_scheduled('sii_wc_dtes_cron_job')) {
+            wp_schedule_event(time(), 'hourly', 'sii_wc_dtes_cron_job');
+        }
+    }
+
+    private static function unschedule_cron_jobs() {
+        $timestamp = wp_next_scheduled('sii_wc_dtes_cron_job');
+        if ($timestamp) {
+            wp_unschedule_event($timestamp, 'sii_wc_dtes_cron_job');
+        }
+    }
+
+    public static function sii_wc_dtes_cron_job() {
+        $api_handler = new ApiHandler();
+        $api_handler->manejarDTESinFolio();
+
+        // Obtener el estado de envíos pendientes y actualizar
+        global $wpdb;
+        $envios_pendientes = $wpdb->get_results("SELECT track_id FROM {$wpdb->prefix}sii_wc_dtes WHERE status = 'SENT'");
+        foreach ($envios_pendientes as $envio) {
+            $api_handler->actualizarEstadoEnvioAlSII($envio->track_id);
+        }
     }
 }
+
+// Hooks de activación y desactivación
+register_activation_hook(__FILE__, array('Activator', 'activar'));
+register_deactivation_hook(__FILE__, array('Activator', 'desactivar'));
+
+// Hook para el cron job
+add_action('sii_wc_dtes_cron_job', array('Activator', 'sii_wc_dtes_cron_job'));
 ?>
