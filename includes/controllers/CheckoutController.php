@@ -137,7 +137,32 @@ class CheckoutController {
     
         if ($order && $tipo_documento) {
             $api_handler = new ApiHandler();
-            $resultado = $api_handler->crearFacturaDTE($order);
+            $datos = array(
+                'rut_receptor' => get_post_meta($order_id, '_billing_rut', true),
+                'razon_social_receptor' => get_post_meta($order_id, '_billing_razon_social', true),
+                'giro_receptor' => get_post_meta($order_id, '_billing_giro', true),
+                'direccion_destino_receptor' => $order->get_billing_address_1(),
+                'comuna_destino_receptor' => $order->get_billing_city(),
+                'ciudad_destino_receptor' => $order->get_billing_city(),
+                'monto_iva' => $order->get_total_tax(),
+                'monto_neto' => $order->get_total() - $order->get_total_tax(),
+                'monto_exento' => 0,
+                'monto_total' => $order->get_total(),
+                'tipo_dte' => ($tipo_documento === 'factura_electronica') ? 33 : 39, // Asumimos 33 para Factura Electrónica y 39 para Boleta Electrónica
+                'detalle_productos' => array()
+            );
+
+            foreach ($order->get_items() as $item) {
+                $product = $item->get_product();
+                $datos['detalle_productos'][] = array(
+                    'nombre_item' => $product->get_name(),
+                    'cantidad_item' => $item->get_quantity(),
+                    'valor_unitario' => $item->get_total() / $item->get_quantity(),
+                    'monto_item' => $item->get_total()
+                );
+            }
+
+            $resultado = $api_handler->crearFacturaDTE($order, $datos);
     
             if ($resultado['success']) {
                 $order->add_order_note(
@@ -220,4 +245,3 @@ class CheckoutController {
 }
 
 CheckoutController::init();
-?>

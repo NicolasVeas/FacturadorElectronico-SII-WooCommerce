@@ -10,6 +10,7 @@ class FoliosView {
 
     public static function mostrarFolios() {
         $upload_success = isset($_GET['upload_success']) ? boolval($_GET['upload_success']) : false;
+        $upload_error = isset($_GET['upload_error']) ? sanitize_text_field($_GET['upload_error']) : '';
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['caf_file'])) {
             self::handle_file_upload();
@@ -17,14 +18,14 @@ class FoliosView {
 
         $token = self::get_token();
         if (!$token) {
-            echo 'Error al obtener el token.';
+            echo '<div class="alert alert-danger text-center" role="alert">Error al obtener el token.</div>';
             return;
         }
 
         $response = self::request_api(self::$api_url_folios, $token);
 
         if (is_wp_error($response)) {
-            echo 'Error al obtener los datos de la API: ' . $response->get_error_message();
+            echo '<div class="alert alert-danger text-center" role="alert">Error al obtener los datos de la API: ' . $response->get_error_message() . '</div>';
             error_log('Error al obtener los datos de la API: ' . $response->get_error_message());
             return;
         }
@@ -33,61 +34,93 @@ class FoliosView {
         $data = json_decode($body, true);
 
         if (json_last_error() !== JSON_ERROR_NONE || !is_array($data)) {
-            echo 'Error al procesar los datos de la API: ' . json_last_error_msg();
+            echo '<div class="alert alert-danger text-center" role="alert">Error al procesar los datos de la API: ' . json_last_error_msg() . '</div>';
             error_log('Error al procesar los datos de la API: ' . json_last_error_msg());
             error_log('Respuesta completa: ' . $body);
             return;
         }
 
-        // Filtrar datos para tipo de documento 33 y 39
+        // Filtrar datos para tipo de documento 33, 39 y 61
         $filtered_data = array_filter($data, function ($item) {
-            return is_array($item) && in_array($item['dte_type'], [33, 39]);
+            return is_array($item) && in_array($item['dte_type'], [33, 39, 61]);
         });
 
-        if ($upload_success) {
-            echo '<div class="notice notice-success is-dismissible"><p>Archivo CAF subido correctamente</p></div>';
-        }
-
         ?>
-        <h2>Subir archivo CAF</h2>
-        <form method="post" enctype="multipart/form-data">
-            <input type="file" name="caf_file" accept=".xml" required />
-            <?php submit_button('Subir Archivo'); ?>
-        </form>
-        <hr />
-        <h2>Folios de Documentos</h2>
-        <table class="widefat fixed" cellspacing="0">
-            <thead>
-                <tr>
-                    <th>Tipo de Documento</th>
-                    <th>Folio Hasta</th>
-                    <th>Último Folio Utilizado</th>
-                    <th>Folios Usados</th>
-                    <th>Folios Cancelados</th>
-                    <th>Folios Liberados</th>
-                    <th>Folios Disponibles</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php if (empty($filtered_data)) : ?>
-                    <tr>
-                        <td colspan="7">No se encontraron datos.</td>
-                    </tr>
-                <?php else : ?>
-                    <?php foreach ($filtered_data as $item): ?>
-                        <tr>
-                            <td><?php echo $item['dte_type'] == 33 ? 'Factura Electrónica' : 'Boleta Electrónica'; ?></td>
-                            <td><?php echo esc_html($item['caf_until']); ?></td>
-                            <td><?php echo esc_html($item['max_used_folio']); ?></td>
-                            <td><?php echo esc_html($item['used_folios_quantity']); ?></td>
-                            <td><?php echo esc_html($item['cancelled_folios_quantity']); ?></td>
-                            <td><?php echo esc_html($item['released_folios_quantity']); ?></td>
-                            <td><?php echo esc_html($item['available_folios_quantity']); ?></td>
-                        </tr>
-                    <?php endforeach; ?>
+        <div class="container mt-5">
+            <div id="message-container">
+                <?php if ($upload_success): ?>
+                    <div class="alert alert-success text-center" role="alert">
+                        Archivo CAF subido correctamente.
+                    </div>
+                <?php elseif ($upload_error): ?>
+                    <div class="alert alert-danger text-center" role="alert">
+                        Error al subir el archivo CAF: <?php echo esc_html($upload_error); ?>
+                    </div>
                 <?php endif; ?>
-            </tbody>
-        </table>
+            </div>
+            <h2>Subir archivo CAF</h2>
+            <form id="caf-upload-form" method="post" enctype="multipart/form-data">
+                <input type="file" name="caf_file" accept=".xml" required />
+                <?php submit_button('Subir Archivo'); ?>
+            </form>
+            <hr />
+            <h2>Folios de Documentos</h2>
+            <table class="table table-striped table-bordered">
+                <thead class='thead-dark'>
+                    <tr>
+                        <th>Tipo de Documento</th>
+                        <th>Folio Hasta</th>
+                        <th>Último Folio Utilizado</th>
+                        <th>Folios Usados</th>
+                        <th>Folios Cancelados</th>
+                        <th>Folios Liberados</th>
+                        <th>Folios Disponibles</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($filtered_data)) : ?>
+                        <tr>
+                            <td colspan="7">No se encontraron datos.</td>
+                        </tr>
+                    <?php else : ?>
+                        <?php foreach ($filtered_data as $item): ?>
+                            <tr>
+                                <td><?php echo $item['dte_type'] == 33 ? 'Factura Electrónica' : ($item['dte_type'] == 39 ? 'Boleta Electrónica' : 'Nota de Crédito'); ?></td>
+                                <td><?php echo esc_html($item['caf_until']); ?></td>
+                                <td><?php echo esc_html($item['max_used_folio']); ?></td>
+                                <td><?php echo esc_html($item['used_folios_quantity']); ?></td>
+                                <td><?php echo esc_html($item['cancelled_folios_quantity']); ?></td>
+                                <td><?php echo esc_html($item['released_folios_quantity']); ?></td>
+                                <td><?php echo esc_html($item['available_folios_quantity']); ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Spinner Modal -->
+        <div class="modal fade" id="spinnerModal" tabindex="-1" role="dialog" aria-labelledby="spinnerModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered" role="document">
+                <div class="modal-content">
+                    <div class="modal-body text-center">
+                        <div class="spinner-border" role="status">
+                            <span class="sr-only">Cargando...</span>
+                        </div>
+                        <p>Cargando archivo... Por favor, espera un momento.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+        jQuery(document).ready(function($) {
+            $('#caf-upload-form').on('submit', function() {
+                // Mostrar el spinner modal
+                $('#spinnerModal').modal('show');
+            });
+        });
+        </script>
         <?php
     }
 
@@ -97,15 +130,14 @@ class FoliosView {
         }
 
         if (!isset($_FILES['caf_file']) || $_FILES['caf_file']['error'] != UPLOAD_ERR_OK) {
-            echo 'Error al subir el archivo.';
-            error_log('Error al subir el archivo: ' . $_FILES['caf_file']['error']);
-            return;
+            wp_redirect(add_query_arg('upload_error', 'Error al subir el archivo.'));
+            exit;
         }
 
         $token = self::get_token();
         if (!$token) {
-            echo 'Error al obtener el token.';
-            return;
+            wp_redirect(add_query_arg('upload_error', 'Error al obtener el token.'));
+            exit;
         }
 
         $file = $_FILES['caf_file'];
@@ -113,7 +145,7 @@ class FoliosView {
         $filetype = $file['type'];
         $filecontent = file_get_contents($filename);
 
-        $boundary = wp_generate_password(24);
+        $boundary = '------WebKitFormBoundary' . wp_generate_password(24, false);
 
         $headers = array(
             'Authorization' => 'Bearer ' . $token,
@@ -133,32 +165,18 @@ class FoliosView {
             'timeout' => 60, // Aumentar el tiempo de espera a 60 segundos
         ));
 
-        if (is_wp_error($response)) {
-            echo 'Error al subir el archivo CAF';
-            error_log('Error al subir el archivo CAF: ' . $response->get_error_message());
-            return;
-        }
+        error_log('Respuesta del endpoint de subir archivo: ' . print_r($response, true));
 
         $status_code = wp_remote_retrieve_response_code($response);
         $body = wp_remote_retrieve_body($response);
 
         if ($status_code === 201) {
             // Redirigir para mostrar el mensaje de éxito
-            wp_redirect(add_query_arg('upload_success', '1'));
-            exit;
-        } elseif ($status_code === 401) {
-            // Si el token ha expirado, obtener uno nuevo y volver a intentar
-            $token = self::refresh_token();
-            if ($token) {
-                self::handle_file_upload();
-            } else {
-                echo 'Error al obtener un nuevo token.';
-                error_log('Error al obtener un nuevo token.');
-            }
+            wp_redirect(add_query_arg(array('upload_success' => '1', 'upload_error' => false)));
         } else {
-            echo 'Error al subir el archivo CAF: ' . $body;
-            error_log('Error al subir el archivo CAF: ' . $body);
+            wp_redirect(add_query_arg(array('upload_success' => false, 'upload_error' => $body)));
         }
+        exit;
     }
 
     private static function get_token() {
@@ -242,3 +260,5 @@ class FoliosView {
 }
 
 FoliosView::mostrarFolios();
+
+?>
