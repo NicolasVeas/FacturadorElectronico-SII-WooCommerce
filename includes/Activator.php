@@ -30,8 +30,10 @@ class Activator {
             giro VARCHAR(80) NOT NULL,
             sucursal VARCHAR(20) DEFAULT NULL,
             ciudad_origen VARCHAR(20) DEFAULT NULL,
+            correo VARCHAR(100) DEFAULT NULL,  // Nueva columna para el correo del emisor
             PRIMARY KEY (id)
         ) $charset_collate;
+
 
         CREATE TABLE IF NOT EXISTS {$wpdb->prefix}sii_wc_receivers (
             id INT NOT NULL AUTO_INCREMENT,
@@ -64,15 +66,7 @@ class Activator {
             PRIMARY KEY (id)
         ) $charset_collate;
 
-        CREATE TABLE IF NOT EXISTS {$wpdb->prefix}sii_wc_shipments (
-            id INT NOT NULL AUTO_INCREMENT,
-            dte_id INT NOT NULL,
-            fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            estado VARCHAR(255) NOT NULL,
-            detalle TEXT NOT NULL,
-            PRIMARY KEY (id),
-            FOREIGN KEY (dte_id) REFERENCES {$wpdb->prefix}sii_wc_dtes(id) ON DELETE CASCADE ON UPDATE CASCADE
-        ) $charset_collate;
+        
         ";
 
         require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
@@ -86,8 +80,7 @@ class Activator {
             "{$wpdb->prefix}sii_wc_credentials",
             "{$wpdb->prefix}sii_wc_emitters",
             "{$wpdb->prefix}sii_wc_receivers",
-            "{$wpdb->prefix}sii_wc_dtes",
-            "{$wpdb->prefix}sii_wc_shipments"
+            "{$wpdb->prefix}sii_wc_dtes"
         ];
 
         foreach ($table_names as $table) {

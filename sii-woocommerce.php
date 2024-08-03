@@ -13,41 +13,66 @@ if (!defined('ABSPATH')) {
 
 define('SII_WC_PLUGIN_PATH', plugin_dir_path(__FILE__));
 
+// Incluir funciones comunes
+require_once SII_WC_PLUGIN_PATH . 'includes/common-functions.php';
+
 class SiiWooCommerce {
     public function __construct() {
         require_once SII_WC_PLUGIN_PATH . 'includes/Activator.php';
         require_once SII_WC_PLUGIN_PATH . 'includes/controllers/AdminController.php';
-        require_once SII_WC_PLUGIN_PATH . 'includes/controllers/DTEController.php';
-        require_once SII_WC_PLUGIN_PATH . 'includes/controllers/EmitterController.php';
         require_once SII_WC_PLUGIN_PATH . 'includes/controllers/CheckoutController.php';
-        require_once SII_WC_PLUGIN_PATH . 'includes/controllers/MainController.php';
+        require_once SII_WC_PLUGIN_PATH . 'includes/controllers/CertificateController.php';
+        require_once SII_WC_PLUGIN_PATH . 'includes/controllers/FoliosController.php';
+        require_once SII_WC_PLUGIN_PATH . 'includes/controllers/EmisorController.php';
+        require_once SII_WC_PLUGIN_PATH . 'includes/controllers/CredencialesController.php';
+        require_once SII_WC_PLUGIN_PATH . 'includes/controllers/DTEController.php';
+        require_once SII_WC_PLUGIN_PATH . 'includes/controllers/PedidosEmitidosController.php';
+        require_once SII_WC_PLUGIN_PATH . 'includes/controllers/VerDteController.php';
+        require_once SII_WC_PLUGIN_PATH . 'includes/models/CertificateModel.php';
+        require_once SII_WC_PLUGIN_PATH . 'includes/models/FoliosModel.php';
+        require_once SII_WC_PLUGIN_PATH . 'includes/models/EmisorModel.php';
+        require_once SII_WC_PLUGIN_PATH . 'includes/models/CredencialesModel.php';
         require_once SII_WC_PLUGIN_PATH . 'includes/models/ApiHandler.php';
-        require_once SII_WC_PLUGIN_PATH . 'includes/functions.php'; // Incluir funciones comunes
+        require_once SII_WC_PLUGIN_PATH . 'includes/models/PedidosEmitidosModel.php';
     }
 
     public function init() {
         register_activation_hook(__FILE__, array('Activator', 'activar'));
         AdminController::init();
-        DTEController::init();
-        EmitterController::init();
         CheckoutController::init();
+        DTEController::init();
+        PedidosEmitidosController::init();
+        VerDteController::init();
     }
 }
 
 $sii_woocommerce = new SiiWooCommerce();
 $sii_woocommerce->init();
 
-// Incluir los scripts y estilos necesarios
-function cargar_scripts_estilos() {
+function sii_wc_enqueue_scripts() {
     wp_enqueue_script('jquery');
     wp_enqueue_script('popper-js', 'https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.16.1/umd/popper.min.js', array('jquery'), null, true);
     wp_enqueue_script('bootstrap-js', 'https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js', array('jquery', 'popper-js'), null, true);
     wp_enqueue_style('bootstrap-css', 'https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css');
     wp_enqueue_style('font-awesome', 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css');
+    wp_enqueue_style('animate-css', 'https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css');
     wp_enqueue_script('sweetalert2', 'https://cdn.jsdelivr.net/npm/sweetalert2@10.16.6/dist/sweetalert2.min.js', array('jquery'), null, true);
     wp_enqueue_style('sweetalert2-css', 'https://cdn.jsdelivr.net/npm/sweetalert2@10.16.6/dist/sweetalert2.min.css');
-    wp_enqueue_script('sii-wc-script', plugins_url('../assets/js/main.js', __FILE__), array('jquery'), null, true);
-    wp_localize_script('sii-wc-script', 'ajax_object', array('ajaxurl' => admin_url('admin-ajax.php')));
-    wp_enqueue_style('custom-css', plugin_dir_url(__FILE__) . '../assets/css/estilos-personalizados.css');
+    wp_enqueue_style('custom-css', plugin_dir_url(__FILE__) . 'assets/css/estilos-personalizados.css');
+    
+    if (is_admin()) {
+        wp_enqueue_script('custom-rut-validator', plugins_url('assets/js/custom-rut-validator.js', __FILE__), array('jquery'), null, true);
+        wp_enqueue_script('certificate-scripts', plugins_url('assets/js/certificate-scripts.js', __FILE__), array('jquery', 'sweetalert2', 'custom-rut-validator'), null, true);
+        wp_enqueue_script('folios-scripts', plugins_url('assets/js/folios-scripts.js', __FILE__), array('jquery', 'sweetalert2'), null, true);
+        wp_enqueue_script('emisor-scripts', plugins_url('assets/js/emisor-scripts.js', __FILE__), array('jquery', 'sweetalert2', 'custom-rut-validator'), null, true);
+        wp_enqueue_script('credenciales-scripts', plugins_url('assets/js/credenciales-scripts.js', __FILE__), array('jquery', 'sweetalert2'), null, true);
+        wp_enqueue_script('pedidos-emitidos-scripts', plugins_url('assets/js/pedidos-emitidos.js', __FILE__), array('jquery'), null, true);
+        wp_enqueue_script('ver-dte-scripts', plugins_url('assets/js/ver-dte.js', __FILE__), array('jquery'), null, true);
+
+        wp_localize_script('pedidos-emitidos-scripts', 'sii_wc_ajax', array(
+            'ajaxurl' => admin_url('admin-ajax.php'),
+            'nonce' => wp_create_nonce('get_pedidos_emitidos_nonce')
+        ));
+    }
 }
-add_action('admin_enqueue_scripts', 'cargar_scripts_estilos');
+add_action('admin_enqueue_scripts', 'sii_wc_enqueue_scripts');
