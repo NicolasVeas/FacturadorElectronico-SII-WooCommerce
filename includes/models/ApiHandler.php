@@ -1,7 +1,10 @@
 <?php
+// En el archivo ApiHandler.php
 if (!defined('ABSPATH')) {
-    exit; // Salir si se accede directamente.
+    exit; // Exit if accessed directly
 }
+
+
 
 class ApiHandler {
     private $api_url = 'https://apibeta.riosoft.cl/enterprise/v1/authorization/login/service_clients';
@@ -34,7 +37,6 @@ class ApiHandler {
         }
     }
 
-    // La función obtenerToken permanece igual, utilizando las credenciales almacenadas en la base de datos.
     public function obtenerToken() {
         global $wpdb;
         $credenciales = $wpdb->get_row("SELECT * FROM {$wpdb->prefix}sii_wc_credentials LIMIT 1");
@@ -78,31 +80,32 @@ class ApiHandler {
     }
 
     public function crearFacturaDTE($order, $datos) {
-        error_log("bandera");
+        error_log(json_encode($datos));
+
         global $wpdb;
         $emisor = $wpdb->get_row("SELECT * FROM {$wpdb->prefix}sii_wc_emitters LIMIT 1");
-
+    
         if (!$emisor) {
             error_log("Error: Datos del emisor no encontrados.");
             return ['success' => false, 'response' => 'Datos del emisor no encontrados.'];
         }
-
-        $rut_emisor = $emisor->rut;
-        $razon_social_emisor = $emisor->razon_social;
-        $actecos_emisor = json_decode($emisor->actecos, true)[0]['acteco'];
-        $direccion_origen_emisor = $emisor->direccion_origen;
-        $comuna_origen_emisor = $emisor->comuna_origen;
-        $giro_emisor = $emisor->giro;
-        $sucursal_emisor = $emisor->sucursal;
-        $ciudad_origen_emisor = $emisor->ciudad_origen;
-
-        $rut_receptor = $datos['rut_receptor'];
-        $razon_social_receptor = $datos['razon_social_receptor'];
-        $giro_receptor = $datos['giro_receptor'];
-        $direccion_destino_receptor = $datos['direccion_destino_receptor'];
-        $comuna_destino_receptor = $datos['comuna_destino_receptor'];
-        $ciudad_destino_receptor = $datos['ciudad_destino_receptor'];
-
+    
+        $rut_emisor = strtoupper($emisor->rut);
+        $razon_social_emisor = strtoupper($emisor->razon_social);
+        $actecos_emisor = strtoupper(json_decode($emisor->actecos, true)[0]['acteco']);
+        $direccion_origen_emisor = strtoupper($emisor->direccion_origen);
+        $comuna_origen_emisor = strtoupper($emisor->comuna_origen);
+        $giro_emisor = strtoupper($emisor->giro);
+        $sucursal_emisor = strtoupper($emisor->sucursal);
+        $ciudad_origen_emisor = strtoupper($emisor->ciudad_origen);
+    
+        $rut_receptor = strtoupper($datos['rut_receptor']);
+        $razon_social_receptor = strtoupper($datos['razon_social_receptor']);
+        $giro_receptor = strtoupper($datos['giro_receptor']);
+        $direccion_destino_receptor = strtoupper($datos['direccion_destino_receptor']);
+        $comuna_destino_receptor = strtoupper($datos['comuna_destino_receptor']);
+        $ciudad_destino_receptor = strtoupper($datos['ciudad_destino_receptor']);
+    
         $totales = array(
             'monto_iva' => $datos['monto_iva'],
             'monto_neto' => $datos['monto_neto'],
@@ -110,17 +113,17 @@ class ApiHandler {
             'monto_total' => $datos['monto_total'],
             'tasa_iva' => 19.00
         );
-
+    
         $detalle_productos = array();
         foreach ($datos['detalle_productos'] as $producto) {
             $detalle_productos[] = array(
-                'nombre_item' => $producto['nombre_item'],
+                'nombre_item' => strtoupper($producto['nombre_item']),
                 'cantidad_item' => $producto['cantidad_item'],
                 'valor_unitario' => $producto['valor_unitario'],
                 'monto_item' => $producto['monto_item']
             );
         }
-
+    
         $data = array(
             array(
                 'documento' => array(
@@ -153,7 +156,7 @@ class ApiHandler {
                 )
             )
         );
-
+    
         $response = wp_remote_post('https://apibeta.riosoft.cl/dtemanager/v1/manager/sync/dte/sign/simple/electronic-bill', array(
             'method' => 'POST',
             'body' => json_encode($data),
@@ -164,43 +167,119 @@ class ApiHandler {
             ),
             'timeout' => 15,
         ));
+    
+        if (is_wp_error($response)) {
+            if (wp_remote_retrieve_response_code($response) === 401) {
+                $this->token = $this->refreshToken();
+                if ($this->token) {
+                    $response = wp_remote_post('https://apibeta.riosoft.cl/dtemanager/v1/manager/sync/dte/sign/simple/electronic-bill', array(
+                        'method' => 'POST',
+                        'body' => json_encode($data),
+                        'headers' => array(
+                            'product' => 'ERP',
+                            'Content-Type' => 'application/json',
+                            'Authorization' => 'Bearer ' . $this->token
+                        ),
+                        'timeout' => 15,
+                    ));
+                } else {
+                    return array(
+                        'success' => false,
+                        'response' => 'Error al obtener un nuevo token.'
+                    );
+                }
+            } else {
+                error_log("Error en la solicitud a la API: " . $response->get_error_message());
+                return array(
+                    'success' => false,
+                    'response' => $response->get_error_message()
+                );
+            }
+        }
+    
+        $body = wp_remote_retrieve_body($response);
+        $data = json_decode($body, true);
+        
+        if (isset($data['status']) && $data['status'] === 'ALL_SIGNED') {
+            $this->guardarDTEDatos($order->get_id(), $data['documents'][0], $rut_emisor, $rut_receptor);
+            return array('success' => true, 'response' => $data);
+        } elseif (isset($data['message']) && $data['message'] === 'Please check details for issue explanation') {
+            error_log(json_encode($data['details']));
+            foreach ($data['details'] as $detail) {
+                if (strpos($detail, 'No CAF found for folio ELECTRONIC_BILL') !== false) {
+                    error_log("d");
+                    error_log("Error: No hay folios disponibles para el tipo de documento ELECTRONIC_BILL.");
+                    error_log('Antes de agregar admin_notices');
+                    add_action('admin_notices', function() {
+                        error_log('Dentro del callback de admin_notices'); // Agrega esta línea
+                        echo '<div class="notice notice-error is-dismissible"><p>';
+                        _e('Error: No hay folios disponibles para emitir facturas electrónicas. Por favor, tome las medidas necesarias.', 'woocommerce');
+                        echo '</p></div>';
+                    });
+                    
+                    error_log('Después de agregar admin_notices');
+                    return array('success' => false, 'response' => 'No hay folios disponibles para el tipo de documento ELECTRONIC_BILL.');
+                }
+            }
+            return array('success' => false, 'response' => $body);
+        } elseif (isset($data['status']) && $data['status'] === 'ERROR') {
+            error_log("e");
+            return $this->reintentarConNuevoToken(__FUNCTION__, func_get_args());
+        } else {
+            error_log("f");
+            return array('success' => false, 'response' => $body);
+        }
+    }
+    
+    
+    
+    
+    
+    
+    
 
-        error_log("Solicitud enviada a la API: " . json_encode($data));
-        error_log("Encabezados de la solicitud: " . json_encode(array(
-            'product' => 'ERP',
-            'Content-Type' => 'application/json',
-            'Authorization' => 'Bearer ' . $this->token
-        )));
+    private function refreshToken() {
+        global $wpdb;
+        $credenciales = $wpdb->get_row("SELECT * FROM {$wpdb->prefix}sii_wc_credentials LIMIT 1");
+
+        if (!$credenciales) {
+            return false;
+        }
+
+        $response = wp_remote_post($this->api_url, array(
+            'headers' => array(
+                'email' => $credenciales->email,
+                'password' => $credenciales->password
+            ),
+            'method' => 'GET',
+            'timeout' => 60,
+        ));
 
         if (is_wp_error($response)) {
             error_log("Error en la solicitud a la API: " . $response->get_error_message());
-            return array(
-                'success' => false,
-                'response' => $response->get_error_message()
-            );
+            return false;
         }
 
         $body = wp_remote_retrieve_body($response);
         $data = json_decode($body, true);
 
-        if (isset($data['status']) && $data['status'] === 'ALL_SIGNED') {
-            $this->guardarDTEDatos($order->get_id(), $data['documents'][0], $rut_emisor, $rut_receptor);
-            return array('success' => true, 'response' => $data);
-        } elseif (isset($data['message']) && $data['message'] === 'Please check details for issue explanation') {
-            if (in_array('No CAF found for folio ELECTRONIC_BILL', $data['details'])) {
-                $this->notificarFaltaDeFolios();
-            }
-            return array('success' => false, 'response' => $body);
-        } elseif (isset($data['status']) && $data['status'] === 'ERROR') {
-            return $this->reintentarConNuevoToken(__FUNCTION__, func_get_args());
-        } else {
-            return array('success' => false, 'response' => $body);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            error_log('Error al procesar la respuesta del token (JSON error): ' . json_last_error_msg());
+            error_log('Respuesta completa: ' . $body);
+            return false;
         }
+
+        if (!isset($data['access_token'])) {
+            error_log('Error al procesar la respuesta del token: Access token no encontrado.');
+            error_log('Respuesta completa: ' . $body);
+            return false;
+        }
+
+        update_option('sii_wc_api_token', $data['access_token']);
+        return $data['access_token'];
     }
 
     private function notificarFaltaDeFolios() {
-        // Aquí puedes implementar una lógica para notificar al administrador del sitio que se necesitan folios
-        // Por ejemplo, enviar un correo electrónico o mostrar una notificación en el panel de administración
         error_log("No quedan folios disponibles. Es necesario cargar un CAF archivo en formato .XML.");
     }
 
@@ -221,65 +300,88 @@ class ApiHandler {
     public function agruparDTE($order_id) {
         global $wpdb;
 
-        $dte = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$wpdb->prefix}sii_wc_dtes WHERE order_id = %d AND status = 'CREATED'", $order_id));
+        $dtes = $wpdb->get_results($wpdb->prepare("SELECT * FROM {$wpdb->prefix}sii_wc_dtes WHERE order_id = %d AND status = 'CREATED'", $order_id));
 
-        if (!$dte) {
+        if (!$dtes) {
             error_log("Error: Datos del DTE no encontrados o no en estado CREATED para la orden $order_id.");
             return ['success' => false, 'response' => 'Datos del DTE no encontrados o no en estado CREATED.'];
         }
 
-        $data = array(
-            array(
-                'document_type' => $dte->document_type,
-                'document_number' => $dte->document_number
-            )
-        );
-
-        error_log("Enviando solicitud de agrupación para la orden $order_id con datos: " . json_encode($data));
-
-        $response = wp_remote_post('https://apibeta.riosoft.cl/dtemanager/v1/manager/sync/dte/sign/sending/group', array(
-            'method' => 'POST',
-            'body' => json_encode($data),
-            'headers' => array(
-                'product' => 'ERP',
-                'rut_emitter' => $dte->rut_emisor,
-                'rut_receptor' => '60803000-K',
-                'resolution_date' => '2017-02-14',
-                'resolution_number' => '0',
-                'Content-Type' => 'application/json',
-                'Authorization' => 'Bearer ' . $this->token
-            ),
-            'timeout' => 15,
-        ));
-
-        if (is_wp_error($response)) {
-            error_log("Error en la solicitud a la API (agrupar DTE) para la orden $order_id: " . $response->get_error_message());
-            return array(
-                'success' => false,
-                'response' => $response->get_error_message()
+        foreach ($dtes as $dte) {
+            $data = array(
+                array(
+                    'document_type' => $dte->document_type,
+                    'document_number' => $dte->document_number
+                )
             );
+
+            $response = wp_remote_post('https://apibeta.riosoft.cl/dtemanager/v1/manager/sync/dte/sign/sending/group', array(
+                'method' => 'POST',
+                'body' => json_encode($data),
+                'headers' => array(
+                    'product' => 'ERP',
+                    'rut_emitter' => $dte->rut_emisor,
+                    'rut_receptor' => '60803000-K',
+                    'resolution_date' => '2017-02-14',
+                    'resolution_number' => '0',
+                    'Content-Type' => 'application/json',
+                    'Authorization' => 'Bearer ' . $this->token
+                ),
+                'timeout' => 15,
+            ));
+
+            if (is_wp_error($response)) {
+                if (wp_remote_retrieve_response_code($response) === 401) {
+                    $this->token = $this->refreshToken();
+                    if ($this->token) {
+                        $response = wp_remote_post('https://apibeta.riosoft.cl/dtemanager/v1/manager/sync/dte/sign/sending/group', array(
+                            'method' => 'POST',
+                            'body' => json_encode($data),
+                            'headers' => array(
+                                'product' => 'ERP',
+                                'rut_emitter' => $dte->rut_emisor,
+                                'rut_receptor' => '60803000-K',
+                                'resolution_date' => '2017-02-14',
+                                'resolution_number' => '0',
+                                'Content-Type' => 'application/json',
+                                'Authorization' => 'Bearer ' . $this->token
+                            ),
+                            'timeout' => 15,
+                        ));
+                    } else {
+                        return array(
+                            'success' => false,
+                            'response' => 'Error al obtener un nuevo token.'
+                        );
+                    }
+                } else {
+                    error_log("Error en la solicitud a la API: " . $response->get_error_message());
+                    return array(
+                        'success' => false,
+                        'response' => $response->get_error_message()
+                    );
+                }
+            }
+
+            $body = wp_remote_retrieve_body($response);
+            $data = json_decode($body);
+
+            if (isset($data->status) && $data->status === 'ALL_SIGNED') {
+                $this->actualizarEstadoDTE($dte->id, 'GROUPED');
+                error_log("DTE agrupado exitosamente para la orden $order_id.");
+                $this->actualizarFoliosPendientes($order_id);
+            } elseif (isset($data->status) && $data->status === 'ERROR') {
+                return $this->reintentarConNuevoToken(__FUNCTION__, func_get_args());
+            } else {
+                error_log("Error en la respuesta de la API (agrupar DTE) para la orden $order_id: " . $body);
+                return array(
+                    'success' => false,
+                    'response' => $body
+                );
+            }
         }
 
-        $body = wp_remote_retrieve_body($response);
-        $data = json_decode($body);
-
-        if (isset($data->status) && $data->status === 'ALL_SIGNED') {
-            $this->actualizarEstadoDTE($dte->id, 'GROUPED');
-            error_log("DTE agrupado exitosamente para la orden $order_id.");
-            $this->actualizarFoliosPendientes($order_id);
-            return array(
-                'success' => true,
-                'response' => $data
-            );
-        } elseif (isset($data['status']) && $data['status'] === 'ERROR') {
-            return $this->reintentarConNuevoToken(__FUNCTION__, func_get_args());
-        } else {
-            error_log("Error en la respuesta de la API (agrupar DTE) para la orden $order_id: " . $body);
-            return array(
-                'success' => false,
-                'response' => $body
-            );
-        }
+        return array('success' => true, 'response' => 'DTEs agrupados exitosamente.');
     }
 
     private function actualizarEstadoDTE($dte_id, $estado) {
@@ -297,60 +399,59 @@ class ApiHandler {
     public function enviarDocumentoAlSII($order_id) {
         global $wpdb;
 
-        $dte = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$wpdb->prefix}sii_wc_dtes WHERE order_id = %d", $order_id));
+        $dtes = $wpdb->get_results($wpdb->prepare("SELECT * FROM {$wpdb->prefix}sii_wc_dtes WHERE order_id = %d AND status = 'GROUPED'", $order_id));
 
-        if (!$dte || $dte->status !== 'GROUPED' || !$dte->folio) {
-            error_log("Error: Datos del DTE no encontrados, no agrupados o sin folio.");
-            return ['success' => false, 'response' => 'Datos del DTE no encontrados, no agrupados o sin folio.'];
-        }
+        foreach ($dtes as $dte) {
+            if (!$dte->folio) {
+                error_log("Error: DTE con id {$dte->id} no tiene folio.");
+                continue;
+            }
 
-        $response = wp_remote_request('https://apibeta.riosoft.cl/dtemanager/v1/manager/sync/dte/sendings/sii/upload/' . $dte->folio, array(
-            'method' => 'PUT',
-            'headers' => array(
-                'product' => 'ERP',
-                'Authorization' => 'Bearer ' . $this->token
-            ),
-            'timeout' => 15,
-        ));
-
-        if (is_wp_error($response)) {
-            error_log("Error en la solicitud a la API (enviar Documento al SII): " . $response->get_error_message());
-            return array(
-                'success' => false,
-                'response' => $response->get_error_message()
-            );
-        }
-
-        $body = wp_remote_retrieve_body($response);
-        $data = json_decode($body, true);
-
-        if ($data['status'] === 'OK' && isset($data['track_id'])) {
-            $wpdb->update(
-                "{$wpdb->prefix}sii_wc_dtes",
-                array(
-                    'status' => 'SENT',
-                    'track_id' => $data['track_id']
+            $response = wp_remote_request('https://apibeta.riosoft.cl/dtemanager/v1/manager/sync/dte/sendings/sii/upload/' . $dte->folio, array(
+                'method' => 'PUT',
+                'headers' => array(
+                    'product' => 'ERP',
+                    'Authorization' => 'Bearer ' . $this->token
                 ),
-                array('id' => $dte->id)
-            );
-            error_log("Documento enviado al SII para la orden $order_id con track_id {$data['track_id']}.");
-            return array('success' => true, 'response' => $data);
-        } elseif ($data['status'] === 'SYSTEM_ERROR') {
-            $this->agruparDTE($order_id); // Reagrupar el DTE en caso de error del sistema
-        } else {
-            error_log("Error en la respuesta de la API (enviar Documento al SII): " . $body);
-            $wpdb->update(
-                "{$wpdb->prefix}sii_wc_dtes",
-                array(
-                    'status' => 'NO_SENT'
-                ),
-                array('id' => $dte->id)
-            );
-            return array(
-                'success' => false,
-                'response' => $data
-            );
+                'timeout' => 15,
+            ));
+
+            if (is_wp_error($response)) {
+                error_log("Error en la solicitud a la API (enviar Documento al SII): " . $response->get_error_message());
+                continue;
+            }
+
+            $body = wp_remote_retrieve_body($response);
+            $data = json_decode($body, true);
+
+            if ($data['status'] === 'OK' && isset($data['track_id'])) {
+                $wpdb->update(
+                    "{$wpdb->prefix}sii_wc_dtes",
+                    array(
+                        'status' => 'SENT',
+                        'track_id' => $data['track_id']
+                    ),
+                    array('id' => $dte->id)
+                );
+                error_log("Documento enviado al SII para la orden $order_id con track_id {$data['track_id']}.");
+                sleep(10);
+
+                $this->verificarYActualizarStages($dte->document_type, $dte->document_number);
+            } elseif ($data['status'] === 'SYSTEM_ERROR') {
+                $this->agruparDTE($order_id);
+            } else {
+                error_log("Error en la respuesta de la API (enviar Documento al SII): " . $body);
+                $wpdb->update(
+                    "{$wpdb->prefix}sii_wc_dtes",
+                    array(
+                        'status' => 'NO_SENT'
+                    ),
+                    array('id' => $dte->id)
+                );
+            }
         }
+
+        return array('success' => true, 'response' => 'Documentos enviados al SII.');
     }
 
     public function obtenerFoliosPaginados() {
@@ -383,7 +484,7 @@ class ApiHandler {
             foreach ($data as $folio) {
                 $folios[] = $folio;
                 if ($folio['related'][0]['document_number'] < $min_document_number) {
-                    break 2; // Salir de ambos bucles
+                    break 2;
                 }
             }
 
@@ -413,14 +514,13 @@ class ApiHandler {
 
         foreach ($folios_pendientes as $document) {
             if (isset($document['related'][0]['document_number']) && isset($document['folio'])) {
-                // Actualizar solo si el document_number corresponde al order_id actual
                 $dte = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$wpdb->prefix}sii_wc_dtes WHERE order_id = %d AND document_number = %d", $order_id, $document['related'][0]['document_number']));
                 if ($dte && $document['effective_status'] === 'NOT_SENT') {
                     $updated = $wpdb->update(
                         "{$wpdb->prefix}sii_wc_dtes",
                         array(
                             'folio' => $document['folio'],
-                            'status' => 'GROUPED' // Actualiza el estado a 'GROUPED' si se obtiene el folio
+                            'status' => 'GROUPED'
                         ),
                         array('id' => $dte->id)
                     );
@@ -429,10 +529,9 @@ class ApiHandler {
                         error_log("Error al actualizar el folio para el document_number: {$document['related'][0]['document_number']} en la orden $order_id.");
                     } else {
                         error_log("Folio actualizado para el document_number: {$document['related'][0]['document_number']} en la orden $order_id.");
-                        $this->enviarDocumentoAlSII($order_id); // Enviar el documento al SII después de actualizar el folio
+                        $this->enviarDocumentoAlSII($order_id);
                     }
 
-                    // Asignar solo el folio más reciente (primer coincidencia)
                     break;
                 }
             }
@@ -486,6 +585,10 @@ class ApiHandler {
         $summary = $data['header']['summary'];
         $ticket_number = $data['header']['ticket_number'];
 
+        if ($status == 'EPR') {
+            $status = 'SENT';
+        }
+
         global $wpdb;
         $wpdb->update(
             "{$wpdb->prefix}sii_wc_dtes",
@@ -497,27 +600,197 @@ class ApiHandler {
 
         $dte = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$wpdb->prefix}sii_wc_dtes WHERE track_id = %d", $track_id));
         if ($dte) {
-            $wpdb->insert(
-                "{$wpdb->prefix}sii_wc_shipments",
-                array(
-                    'dte_id' => $dte->id,
-                    'fecha' => current_time('mysql'),
-                    'estado' => $status,
-                    'detalle' => $summary . " - " . $ticket_number
-                )
-            );
+            sleep(10);
+
+            $this->verificarYActualizarStages($dte->document_type, $dte->document_number);
         }
 
         error_log("Estado del envío con track_id {$track_id} actualizado a {$status}.");
     }
 
-    public function manejarDTESinFolio() {
+    public function verificarYActualizarStages($document_type, $document_number, $reintento = false) {
         global $wpdb;
-        $dtes_sin_folio = $wpdb->get_results("SELECT order_id FROM {$wpdb->prefix}sii_wc_dtes WHERE status = 'GROUPED' AND (folio IS NULL OR folio = 0)");
+        error_log($document_type . " " . $document_number . " " . $reintento);
+        $dte = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$wpdb->prefix}sii_wc_dtes WHERE document_type = %d AND document_number = %d", $document_type, $document_number));
+        if (!$dte) {
+            error_log("Error: Datos del DTE no encontrados para document_type {$document_type} y document_number {$document_number}.");
+            return;
+        }
+        $order_id = $dte->order_id;
+        $token = $this->obtenerToken();
+        $api_url = "https://apibeta.riosoft.cl/dtemanager/v1/manager/dtes?page=1&dte_types={$document_type}&dte_numbers={$document_number}";
 
-        foreach ($dtes_sin_folio as $dte) {
-            $this->actualizarFoliosPendientes($dte->order_id);
+        $response = wp_remote_get($api_url, array(
+            'headers' => array(
+                'product' => 'ERP',
+                'Content-Type' => 'application/json',
+                'Authorization' => 'Bearer ' . $token,
+            ),
+            'timeout' => 30
+        ));
+
+        if (is_wp_error($response)) {
+            error_log("Error al obtener los stages del DTE: " . $response->get_error_message());
+            return;
+        }
+
+        $response_code = wp_remote_retrieve_response_code($response);
+        $body = wp_remote_retrieve_body($response);
+
+        if ($response_code === 401 && !$reintento) {
+            $this->token = $this->obtenerToken(true);
+            $this->verificarYActualizarStages($document_type, $document_number, true);
+            return;
+        }
+
+        $data = json_decode($body, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE || empty($data)) {
+            error_log("Error al procesar los stages del DTE: " . json_last_error_msg());
+            return;
+        }
+
+        $stages = $data[0]['stages'] ?? [];
+
+        usort($stages, function ($a, $b) {
+            return strtotime($a['register_date']) - strtotime($b['register_date']);
+        });
+
+        $ultimo_stage = end($stages)['stage']['stage_emission'] ?? null;
+
+        $nuevo_estado = null;
+        if ($ultimo_stage === 'SII_UPLOAD_DTE_STATUS_RCT' || $ultimo_stage === 'SII_DOC_STATUS_FAU' || $ultimo_stage === 'SII_UPLOAD_DTE_STATUS_OTH') {
+            $nuevo_estado = 'REJECTED';
+        } elseif ($ultimo_stage === 'SII_DOC_STATUS_DOK') {
+            $nuevo_estado = 'ACCEPTED';
+        }
+
+        if ($nuevo_estado) {
+            $wpdb->update(
+                "{$wpdb->prefix}sii_wc_dtes",
+                array(
+                    'status' => $nuevo_estado
+                ),
+                array(
+                    'document_type' => $document_type,
+                    'document_number' => $document_number
+                )
+            );
+            error_log("Estado del DTE actualizado a {$nuevo_estado} para el document_type {$document_type} y document_number {$document_number}.");
+
+            if ($nuevo_estado === 'ACCEPTED') {
+                $receptor_email = $wpdb->get_var($wpdb->prepare("SELECT meta_value FROM {$wpdb->prefix}postmeta WHERE post_id = %d AND meta_key = '_billing_email'", $order_id));
+                $this->enviarCorreoConXML($order_id, $document_type, $document_number, $receptor_email);
+            }
         }
     }
+
+    public function enviarCorreoConXML($order_id, $document_type, $document_number, $receptor_email) {
+        global $wpdb;
+        error_log($document_type);
+        error_log($document_number);
+        error_log($receptor_email);
+        // Obtener los datos del emisor
+        $emisor = $wpdb->get_row("SELECT * FROM {$wpdb->prefix}sii_wc_emitters LIMIT 1");
+        if (!$emisor) {
+            error_log("Error: Datos del emisor no encontrados.");
+            return ['success' => false, 'response' => 'Datos del emisor no encontrados.'];
+        }
+    
+        // Obtener el correo del emisor
+        $correo_emisor = $emisor->correo;
+    
+        $token = $this->obtenerToken();
+        if (!$token) {
+            return ['success' => false, 'response' => 'Error al obtener el token.'];
+        }
+    
+        $api_url = 'https://apibeta.riosoft.cl/dtemanager/v1/manager/email/send';
+    
+        // Ajuste de la estructura del payload
+        $data = array(
+            'receptors' => [$receptor_email],
+            'receptors_cc' => [$correo_emisor],
+            'subject' => "Envio de tipo {$document_type} folio {$document_number} facturacionmipyme20@sii.cl",
+            'content' => "Adjunto se encuentra el DTE correspondiente.",
+            'dte_info' => array(
+                'folio' => $document_number,
+                'document_type' => $document_type,
+                'rut_receptor' => '60803000-K' // Asumimos que el RUT del receptor es el del emisor
+            )
+        );
+    
+        $response = $this->sendEmailRequest($api_url, $data, $token);
+    
+        if (is_wp_error($response)) {
+            error_log("Error al enviar el correo con el XML: " . $response->get_error_message());
+            return array(
+                'success' => false,
+                'response' => $response->get_error_message()
+            );
+        }
+    
+        $response_code = wp_remote_retrieve_response_code($response);
+        $body = wp_remote_retrieve_body($response);
+        $data = json_decode($body, true);
+    
+        if ($response_code === 401) {
+            // Si el token ha expirado, obtener uno nuevo y volver a intentar
+            $token = $this->refreshToken();
+            if ($token) {
+                $response = $this->sendEmailRequest($api_url, $data, $token);
+    
+                if (is_wp_error($response)) {
+                    error_log("Error al enviar el correo con el XML después de refrescar el token: " . $response->get_error_message());
+                    return array(
+                        'success' => false,
+                        'response' => $response->get_error_message()
+                    );
+                }
+    
+                $response_code = wp_remote_retrieve_response_code($response);
+                $body = wp_remote_retrieve_body($response);
+                $data = json_decode($body, true);
+            } else {
+                return array('success' => false, 'response' => 'Error al obtener un nuevo token.');
+            }
+        }
+    
+        if ($response_code === 202) { // El código 202 indica que el correo fue aceptado para envío
+            return array('success' => true, 'response' => $data);
+        } else {
+            error_log("Error en la respuesta de la API al enviar el correo con el XML: " . $body);
+            return array('success' => false, 'response' => $body);
+        }
+    }
+    
+    private function sendEmailRequest($api_url, $data, $token) {
+        return wp_remote_post($api_url, array(
+            'method' => 'POST',
+            'body' => json_encode($data),
+            'headers' => array(
+                'product' => 'ERP',
+                'Content-Type' => 'application/json',
+                'Authorization' => 'Bearer ' . $token
+            ),
+            'timeout' => 30,
+        ));
+    }
+    
+    public function manejarDTESinFolio() {
+        global $wpdb;
+
+        $dtes_sin_folio = $wpdb->get_results("SELECT order_id, status FROM {$wpdb->prefix}sii_wc_dtes WHERE (status = 'GROUPED' AND (folio IS NULL OR folio = 0)) OR status = 'CREATED'");
+
+        foreach ($dtes_sin_folio as $dte) {
+            if ($dte->status === 'CREATED') {
+                $this->agruparDTE($dte->order_id);
+            } else {
+                $this->actualizarFoliosPendientes($dte->order_id);
+            }
+        }
+    }
+
+    
 }
 ?>

@@ -81,7 +81,7 @@ if (!defined('ABSPATH')) {
 <style>
 .modal-body p {
     margin-bottom: 0.5rem;
-    color: #343a40; /* Aumentar el contraste del texto */
+    color: #343a40;
 }
 
 .modal-body .border-bottom {
@@ -98,12 +98,10 @@ if (!defined('ABSPATH')) {
     border-bottom: 0;
 }
 
-/* Ajustar el espaciado entre secciones */
 .row {
     margin-bottom: 1.5rem;
 }
 
-/* Aumentar el contraste de fondo en secciones */
 .modal-body {
     background-color: #f8f9fa;
 }

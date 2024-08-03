@@ -3,43 +3,65 @@ if (!defined('ABSPATH')) {
     exit; // Salir si se accede directamente.
 }
 
-global $wpdb;
-$items_per_page = 4;
-
-// Obtener pedidos emitidos
-$current_page_emitidos = isset($_POST['page']) ? intval($_POST['page']) : 1;
-$offset_emitidos = ($current_page_emitidos - 1) * $items_per_page;
-
-$query_emitidos = "
-    SELECT 
-        o.id AS order_id, 
-        d.document_type, 
-        d.document_number AS folios, 
-        d.document_date, 
-        d.rut_receptor, 
-        d.status,
-        os.total_sales AS total
-    FROM {$wpdb->prefix}wc_orders AS o
-    LEFT JOIN {$wpdb->prefix}sii_wc_dtes AS d ON o.id = d.order_id
-    LEFT JOIN {$wpdb->prefix}wc_order_stats AS os ON o.id = os.order_id
-    WHERE d.document_number IS NOT NULL
-    ORDER BY o.id DESC
-    LIMIT $offset_emitidos, $items_per_page
-";
-$emitidos = $wpdb->get_results($query_emitidos, ARRAY_A);
-$total_emitidos = $wpdb->get_var("
-    SELECT COUNT(*)
-    FROM {$wpdb->prefix}wc_orders AS o
-    LEFT JOIN {$wpdb->prefix}sii_wc_dtes AS d ON o.id = d.order_id
-    WHERE d.document_number IS NOT NULL
-");
-$total_pages_emitidos = ceil($total_emitidos / $items_per_page);
 ?>
+<style>
+/* Estilos de tabla */
+#pedidos-emitidos-table {
+    width: 100%;
+    border-collapse: collapse;
+}
 
-<div id="emitidos-table-container">
+#pedidos-emitidos-table th, #pedidos-emitidos-table td {
+    padding: 12px 15px;
+    border: 1px solid #ddd;
+    text-align: center;
+}
+
+#pedidos-emitidos-table th:first-child,
+#pedidos-emitidos-table td:first-child,
+#pedidos-emitidos-table th:nth-child(2),
+#pedidos-emitidos-table td:nth-child(2),
+#pedidos-emitidos-table th:nth-child(3),
+#pedidos-emitidos-table td:nth-child(3) {
+    text-align: left;
+}
+
+#pedidos-emitidos-table td.text-right {
+    text-align: right;
+}
+
+#pedidos-emitidos-table tbody tr:hover {
+    background-color: #f1f1f1;
+}
+
+#pagination-container .pagination {
+    margin: 0;
+}
+
+#pagination-container .page-numbers {
+    padding: 10px 15px;
+    border: 1px solid #ddd;
+    color: #007bff;
+    text-decoration: none;
+    margin: 0 5px;
+}
+
+#pagination-container .page-numbers:hover {
+    background-color: #007bff;
+    color: white;
+}
+
+#pagination-container .current {
+    background-color: #007bff;
+    color: white;
+    border: 1px solid #007bff;
+}
+</style>
+
+<div class="container mt-5">
     <h2>Pedidos Emitidos</h2>
-    <table class="table table-bordered">
-        <thead>
+    <table class="table table-bordered table-striped" id="pedidos-emitidos-table">
+        <thead class="thead-dark">
             <tr>
                 <th>ID Pedido</th>
                 <th>Tipo de Documento</th>
@@ -47,51 +69,53 @@ $total_pages_emitidos = ceil($total_emitidos / $items_per_page);
                 <th>Fecha</th>
                 <th>RUT Receptor</th>
                 <th>Monto Total</th>
-                <th>Estado</th>
-                <th>Acciones</th>
+                <th>Progreso</th>
+                <th>Acción</th>
             </tr>
         </thead>
-        <tbody>
-            <?php if (!empty($emitidos)): ?>
-                <?php foreach ($emitidos as $pedido): ?>
-                    <tr>
-                        <td><?php echo esc_html($pedido['order_id']); ?></td>
-                        <td><?php echo $pedido['document_type'] == 33 ? 'Factura Electrónica' : ($pedido['document_type'] == 39 ? 'Boleta Electrónica' : 'Nota de Crédito'); ?></td>
-                        <td><?php echo esc_html($pedido['folios']); ?></td>
-                        <td><?php echo esc_html($pedido['document_date']); ?></td>
-                        <td><?php echo esc_html($pedido['rut_receptor']); ?></td>
-                        <td><?php echo esc_html(number_format($pedido['total'], 2, ',', '.')); ?></td>
-                        <td><?php echo esc_html($pedido['status']); ?></td>
-                        <td>
-                            <button class="btn btn-success ver-dte-btn" data-order-id="<?php echo esc_attr($pedido['order_id']); ?>" data-toggle="tooltip" title="Ver DTE"><i class="fas fa-eye"></i></button>
-                            <button class="btn btn-info detalles-dte-btn" data-document-type="<?php echo esc_attr($pedido['document_type']); ?>" data-document-number="<?php echo esc_attr($pedido['folios']); ?>" data-toggle="tooltip" title="Ver Detalles"><i class="fas fa-info-circle"></i></button>
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-            <?php else: ?>
-                <tr>
-                    <td colspan="8">No se encontraron pedidos emitidos.</td>
-                </tr>
-            <?php endif; ?>
+        <tbody id="pedidos-emitidos-body">
+            <!-- Aquí se cargará el contenido de los pedidos emitidos a través de AJAX -->
         </tbody>
     </table>
-    <?php render_pagination($total_pages_emitidos, $current_page_emitidos, 'emitidos'); ?>
-</div>
 
-<div class="modal fade" id="verDteModal" tabindex="-1" role="dialog" aria-labelledby="verDteModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="verDteModalLabel">Detalles del DTE</h5>
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                    <span aria-hidden="true">&times;</span>
-                </button>
+    <div id="pagination-container" class="d-flex justify-content-center mt-3">
+        <!-- Aquí se cargará la paginación a través de AJAX -->
+    </div>
+
+    <!-- Modal de carga -->
+    <div class="modal fade" id="spinnerModal" tabindex="-1" role="dialog" aria-labelledby="spinnerModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered" role="document">
+            <div class="modal-content">
+                <div class="modal-body text-center">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="sr-only">Cargando...</span>
+                    </div>
+                    <p class="mt-3">Cambiando de página... por favor, espera un momento.</p>
+                </div>
             </div>
-            <div class="modal-body" id="ver-dte-modal-content">
-                <!-- Contenido cargado dinámicamente -->
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-dismiss="modal">Cerrar</button>
+        </div>
+    </div>
+
+    <!-- Modal para Ver DTE -->
+    <div class="modal fade" id="viewDteModal" tabindex="-1" role="dialog" aria-labelledby="viewDteModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="viewDteModalLabel">Ver DTE</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body text-center">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="sr-only">Cargando...</span>
+                    </div>
+                    <p class="mt-3">Cargando datos del DTE...</p>
+                </div>
+                <div class="modal-body-content"></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Cerrar</button>
+                </div>
             </div>
         </div>
     </div>
