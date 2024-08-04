@@ -3,7 +3,17 @@ if (!defined('ABSPATH')) {
     exit; // Salir si se accede directamente.
 }
 
+global $wpdb;
+
+$items_per_page = 10;
+$page = isset($_GET['paged']) ? absint($_GET['paged']) : 1;
+$offset = ($page - 1) * $items_per_page;
+
+$emitidos = PedidosEmitidosModel::getPedidosEmitidos($offset, $items_per_page);
+$total_emitidos = PedidosEmitidosModel::getTotalPedidosEmitidos();
+$total_pages = ceil($total_emitidos / $items_per_page);
 ?>
+
 <style>
 /* Estilos de tabla */
 #pedidos-emitidos-table {
@@ -74,12 +84,65 @@ if (!defined('ABSPATH')) {
             </tr>
         </thead>
         <tbody id="pedidos-emitidos-body">
-            <!-- Aquí se cargará el contenido de los pedidos emitidos a través de AJAX -->
+            <?php if (!empty($emitidos)) : ?>
+                <?php foreach ($emitidos as $pedido) : ?>
+                    <tr>
+                        <td class="text-right"><?php echo esc_html($pedido['order_id']); ?></td>
+                        <td><?php echo esc_html(format_document_type($pedido['document_type'])); ?></td>
+                        <td class="text-right"><?php echo esc_html($pedido['document_number']); ?></td>
+                        <td><?php echo esc_html(date('d-m-Y', strtotime($pedido['document_date']))); ?></td>
+                        <td><?php echo esc_html($pedido['rut_receptor']); ?></td>
+                        <td class="text-right"><?php echo esc_html(format_currency($pedido['total'])); ?></td>
+                        <td>
+                            <?php 
+                            $statusClass = '';
+                            switch ($pedido['status']) {
+                                case 'ACCEPTED':
+                                    $statusClass = 'badge badge-success';
+                                    break;
+                                case 'REJECTED':
+                                    $statusClass = 'badge badge-danger';
+                                    break;
+                                case 'GROUPED':
+                                    $statusClass = 'badge badge-secondary';
+                                    break;
+                                default:
+                                    $statusClass = 'badge badge-warning';
+                            }
+                            echo '<span class="' . esc_attr($statusClass) . '">' . esc_html($pedido['status']) . '</span>'; 
+                            ?>
+                        </td>
+                        <td>
+                            <button class="btn btn-info btn-sm view-dte-btn" data-order-id="<?php echo esc_attr($pedido['order_id']); ?>"><i class="fas fa-file-alt"></i> Ver DTE</button>
+                            <button class="btn btn-secondary btn-sm view-trazabilidad-btn" data-order-id="<?php echo esc_attr($pedido['order_id']); ?>"><i class="fas fa-clipboard-list"></i> Trazabilidad</button>
+                            <?php if ($pedido['status'] == 'ACCEPTED') : ?>
+                                <button class="btn btn-primary btn-sm reenviar-dte-btn" data-order-id="<?php echo esc_attr($pedido['order_id']); ?>"><i class="fas fa-envelope"></i> Reenviar DTE</button>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+            <?php else : ?>
+                <tr>
+                    <td colspan="8" class="text-center">No se encontraron pedidos emitidos.</td>
+                </tr>
+            <?php endif; ?>
         </tbody>
     </table>
 
     <div id="pagination-container" class="d-flex justify-content-center mt-3">
-        <!-- Aquí se cargará la paginación a través de AJAX -->
+        <?php
+        $pagination_args = array(
+            'base' => add_query_arg('paged', '%#%'),
+            'format' => '',
+            'total' => $total_pages,
+            'current' => $page,
+            'prev_text' => __('&laquo; Anterior', 'sii-woocommerce'),
+            'next_text' => __('Siguiente &raquo;', 'sii-woocommerce'),
+        );
+        echo '<nav><ul class="pagination">';
+        echo paginate_links($pagination_args);
+        echo '</ul></nav>';
+        ?>
     </div>
 
     <!-- Modal de carga -->
@@ -88,9 +151,9 @@ if (!defined('ABSPATH')) {
             <div class="modal-content">
                 <div class="modal-body text-center">
                     <div class="spinner-border text-primary" role="status">
-                        <span class="sr-only">Cargando...</span>
+                        <span class="sr-only">Espere un momento por favor...</span>
                     </div>
-                    <p class="mt-3">Cambiando de página... por favor, espera un momento.</p>
+                    <p class="mt-3">Espere un momento por favor...</p>
                 </div>
             </div>
         </div>
@@ -100,23 +163,52 @@ if (!defined('ABSPATH')) {
     <div class="modal fade" id="viewDteModal" tabindex="-1" role="dialog" aria-labelledby="viewDteModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered modal-lg" role="document">
             <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="viewDteModalLabel">Ver DTE</h5>
-                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                        <span aria-hidden="true">&times;</span>
-                    </button>
-                </div>
                 <div class="modal-body text-center">
                     <div class="spinner-border text-primary" role="status">
-                        <span class="sr-only">Cargando...</span>
+                        <span class="sr-only">Espere un momento por favor...</span>
                     </div>
-                    <p class="mt-3">Cargando datos del DTE...</p>
+                    <p class="mt-3">Espere un momento por favor...</p>
                 </div>
                 <div class="modal-body-content"></div>
-                <div class="modal-footer">
+                <div class="modal-footer" style="display: none;">
                     <button type="button" class="btn btn-secondary" data-dismiss="modal">Cerrar</button>
                 </div>
             </div>
         </div>
     </div>
+
+    <!-- Modal para Trazabilidad -->
+    <div class="modal fade" id="trazabilidadModal" tabindex="-1" role="dialog" aria-labelledby="trazabilidadModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg" role="document">
+            <div class="modal-content">
+                <div class="modal-body text-center">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="sr-only">Espere un momento por favor...</span>
+                    </div>
+                    <p class="mt-3">Espere un momento por favor...</p>
+                </div>
+                <div class="modal-body-content"></div>
+                <div class="modal-footer" style="display: none;">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal para Reenviar DTE -->
+    <div class="modal fade" id="reenviarDteModal" tabindex="-1" role="dialog" aria-labelledby="reenviarDteModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg" role="document">
+            <div class="modal-content">
+                <div class="modal-body text-center">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="sr-only">Espere un momento por favor...</span>
+                    </div>
+                    <p class="mt-3">Espere un momento por favor...</p>
+                    <div class="modal-body-content"></div>
+                </div>
+              
+            </div>
+        </div>
+    </div>
+
 </div>

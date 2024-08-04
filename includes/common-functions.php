@@ -24,6 +24,7 @@ if (!function_exists('format_currency')) {
     }
 }
 
+
 if (!function_exists('format_status_class')) {
     function format_status_class($status) {
         switch ($status) {

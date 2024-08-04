@@ -638,7 +638,7 @@ class ApiHandler {
         $body = wp_remote_retrieve_body($response);
 
         if ($response_code === 401 && !$reintento) {
-            $this->token = $this->obtenerToken(true);
+            $this->token = $this->obtenerToken();
             $this->verificarYActualizarStages($document_type, $document_number, true);
             return;
         }

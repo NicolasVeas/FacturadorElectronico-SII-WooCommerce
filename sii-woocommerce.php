@@ -25,24 +25,28 @@ class SiiWooCommerce {
         require_once SII_WC_PLUGIN_PATH . 'includes/controllers/FoliosController.php';
         require_once SII_WC_PLUGIN_PATH . 'includes/controllers/EmisorController.php';
         require_once SII_WC_PLUGIN_PATH . 'includes/controllers/CredencialesController.php';
-        require_once SII_WC_PLUGIN_PATH . 'includes/controllers/DTEController.php';
         require_once SII_WC_PLUGIN_PATH . 'includes/controllers/PedidosEmitidosController.php';
         require_once SII_WC_PLUGIN_PATH . 'includes/controllers/VerDteController.php';
+        require_once SII_WC_PLUGIN_PATH . 'includes/controllers/TrazabilidadController.php';
+        require_once SII_WC_PLUGIN_PATH . 'includes/controllers/ReenviarDteController.php';
         require_once SII_WC_PLUGIN_PATH . 'includes/models/CertificateModel.php';
         require_once SII_WC_PLUGIN_PATH . 'includes/models/FoliosModel.php';
         require_once SII_WC_PLUGIN_PATH . 'includes/models/EmisorModel.php';
         require_once SII_WC_PLUGIN_PATH . 'includes/models/CredencialesModel.php';
         require_once SII_WC_PLUGIN_PATH . 'includes/models/ApiHandler.php';
         require_once SII_WC_PLUGIN_PATH . 'includes/models/PedidosEmitidosModel.php';
+        require_once SII_WC_PLUGIN_PATH . 'includes/models/TrazabilidadModel.php';
+        require_once SII_WC_PLUGIN_PATH . 'includes/models/ReenviarDteModel.php';
     }
 
     public function init() {
         register_activation_hook(__FILE__, array('Activator', 'activar'));
         AdminController::init();
         CheckoutController::init();
-        DTEController::init();
         PedidosEmitidosController::init();
         VerDteController::init();
+        TrazabilidadController::init();
+        ReenviarDteController::init();
     }
 }
 
@@ -59,8 +63,20 @@ function sii_wc_enqueue_scripts() {
     wp_enqueue_script('sweetalert2', 'https://cdn.jsdelivr.net/npm/sweetalert2@10.16.6/dist/sweetalert2.min.js', array('jquery'), null, true);
     wp_enqueue_style('sweetalert2-css', 'https://cdn.jsdelivr.net/npm/sweetalert2@10.16.6/dist/sweetalert2.min.css');
     wp_enqueue_style('custom-css', plugin_dir_url(__FILE__) . 'assets/css/estilos-personalizados.css');
-    
+
     if (is_admin()) {
+        // Enqueue the common AJAX script first
+        wp_enqueue_script('sii-wc-ajax', plugins_url('assets/js/sii-wc-ajax.js', __FILE__), array('jquery'), null, true);
+        wp_localize_script('sii-wc-ajax', 'ajax_object', array(
+            'ajaxurl' => admin_url('admin-ajax.php'),
+            'nonces' => array(
+                'get_pedidos_emitidos_nonce' => wp_create_nonce('get_pedidos_emitidos_nonce'),
+                'view_dte_nonce' => wp_create_nonce('view_dte_nonce'),
+                'view_trazabilidad_nonce' => wp_create_nonce('view_trazabilidad_nonce'),
+                'send_reenviar_dte_nonce' => wp_create_nonce('send_reenviar_dte_nonce')
+            )
+        ));
+
         wp_enqueue_script('custom-rut-validator', plugins_url('assets/js/custom-rut-validator.js', __FILE__), array('jquery'), null, true);
         wp_enqueue_script('certificate-scripts', plugins_url('assets/js/certificate-scripts.js', __FILE__), array('jquery', 'sweetalert2', 'custom-rut-validator'), null, true);
         wp_enqueue_script('folios-scripts', plugins_url('assets/js/folios-scripts.js', __FILE__), array('jquery', 'sweetalert2'), null, true);
@@ -68,11 +84,10 @@ function sii_wc_enqueue_scripts() {
         wp_enqueue_script('credenciales-scripts', plugins_url('assets/js/credenciales-scripts.js', __FILE__), array('jquery', 'sweetalert2'), null, true);
         wp_enqueue_script('pedidos-emitidos-scripts', plugins_url('assets/js/pedidos-emitidos.js', __FILE__), array('jquery'), null, true);
         wp_enqueue_script('ver-dte-scripts', plugins_url('assets/js/ver-dte.js', __FILE__), array('jquery'), null, true);
+        wp_enqueue_script('trazabilidad-scripts', plugins_url('assets/js/trazabilidad.js', __FILE__), array('jquery'), null, true);
+        wp_enqueue_script('reenviar-dte-scripts', plugins_url('assets/js/reenviar-dte.js', __FILE__), array('jquery'), null, true);
 
-        wp_localize_script('pedidos-emitidos-scripts', 'sii_wc_ajax', array(
-            'ajaxurl' => admin_url('admin-ajax.php'),
-            'nonce' => wp_create_nonce('get_pedidos_emitidos_nonce')
-        ));
+        wp_enqueue_script('admin-scripts', plugins_url('assets/js/admin-scripts.js', __FILE__), array('jquery'), null, true);
     }
 }
 add_action('admin_enqueue_scripts', 'sii_wc_enqueue_scripts');
